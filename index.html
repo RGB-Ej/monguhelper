@@ -202,6 +202,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
 <script>
 (function(){
 const COLLS=['pens','doses','meals','weights'];
+const APP={clicks:60};
 const S={people:{a:{name:'شخص ١',c:0},b:{name:'شخص ٢',c:1}},pens:[],doses:[],meals:[],weights:[]};
 let view='dash', who='all', db=null, mode='loading', sampleFn=null, canImg=false;
 let lang='ar';try{const l=localStorage.getItem('mongu-lang');if(l==='en'||l==='ar')lang=l}catch{}
@@ -235,8 +236,9 @@ function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTi
 
 /* ---------- storage ---------- */
 const LKEY='mounjaro-tracker-v1';
-function loadLocal(){try{const raw=localStorage.getItem(LKEY);if(raw){const o=JSON.parse(raw);Object.assign(S,o);S.people=parsePeople(o.people)}}catch{}}
-function saveLocal(){try{localStorage.setItem(LKEY,JSON.stringify(S))}catch{}}
+function loadLocal(){try{const raw=localStorage.getItem(LKEY);if(raw){const o=JSON.parse(raw);Object.assign(S,o);S.people=parsePeople(o.people);if(o.app&&+o.app.clicks>0)APP.clicks=+o.app.clicks}}catch{}}
+function saveLocal(){try{localStorage.setItem(LKEY,JSON.stringify({...S,app:APP}))}catch{}}
+async function saveApp(){if(db){try{await db.doc('settings/app').set({...APP})}catch(e){fail(e)}}else{saveLocal()}render()}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 function parsePeople(d){
   const out={};let i=0;
@@ -275,6 +277,7 @@ async function initStore(){
   COLLS.forEach(c=>{
     db.collection(c).orderBy('ts','desc').limit(1000).onSnapshot(s=>{S[c]=s.docs.map(d=>({id:d.id,...d.data()}));render()},()=>{});
   });
+  db.doc('settings/app').onSnapshot(s=>{if(s.exists){const d=s.data();if(+d.clicks>0)APP.clicks=+d.clicks;render()}},()=>{});
   db.doc('settings/people').onSnapshot(s=>{if(s.exists){S.people=parsePeople(s.data());if(who!=='all'&&!S.people[who])who='all';render()}},()=>{});
   render();
 }
@@ -312,6 +315,9 @@ function forecast(pen){
   return {u,plan:r.plan,emptyOn:r.emptyOn,weekly:Object.values(cur).reduce((a,b)=>a+b,0)};
 }
 function barrel(u){return `<div class="barrel" role="img" aria-label="${n(u.remaining)} / ${n(u.total)} ${MG()}">${PIDS().filter(p=>u.by[p]).map(p=>`<span style="width:${u.total?Math.min(100,u.by[p]/u.total*100):0}%;background:${col(p)}"></span>`).join('')}<span class="left" style="flex:1"></span></div>`}
+const perDose=p=>+(p&&p.clicks)>0?+p.clicks:+APP.clicks;
+const clk=(mg,p)=>p&&+p.strength>0&&perDose(p)>0&&mg>0?mg/+p.strength*perDose(p):null;
+const clkTxt=x=>x==null?'':`≈ ${n(x,0)} ${L('تكة','clicks')}`;
 const acts=(c,id)=>`<span class="acts"><button class="del" type="button" data-edit="${c}:${id}">${L('تعديل','Edit')}</button><button class="del" type="button" data-del="${c}:${id}">${L('حذف','Delete')}</button></span>`;
 
 /* ---------- header ---------- */
@@ -360,7 +366,7 @@ function vDoses(){
   const ds=S.doses.filter(inWho).sort(byDateDesc);
   const penName=id=>{const p=S.pens.find(x=>x.id===id);return p?penTitle(p):'—'};
   const list=ds.length?`<div class="list">${ds.map(d=>`<div class="item">${tag(d.person)}
-    <div class="main"><div class="t num">${n(+d.mg)} ${MG()} · ${fmtDate(d.date)}</div><div class="d">${pname(d.person)} · ${esc(tr(SITES,d.site||''))} · ${penName(d.pen)}${d.note?' · '+esc(d.note):''}</div></div>
+    <div class="main"><div class="t num">${n(+d.mg)} ${MG()}${(()=>{const c=clk(+d.mg,S.pens.find(x=>x.id===d.pen));return c?' ('+clkTxt(c)+')':''})()} · ${fmtDate(d.date)}</div><div class="d">${pname(d.person)} · ${esc(tr(SITES,d.site||''))} · ${penName(d.pen)}${d.note?' · '+esc(d.note):''}</div></div>
     ${acts('doses',d.id)}</div>`).join('')}</div>`
     :`<div class="empty"><span>${L('مفيش جرعات متسجلة.','No doses logged.')}</span></div>`;
   return penHtml+`<button class="btn full" data-open="dose" type="button" ${S.pens.length?'':'disabled style="opacity:.5"'}>${L('سجّل جرعة','Log a dose')}</button>
@@ -393,9 +399,9 @@ function vMeals(){
   const days={};ms.forEach(m=>{(days[m.date]=days[m.date]||[]).push(m)});
   const html=Object.keys(days).sort().reverse().map(d=>{
     const rows=days[d];
-    const pr=PIDS().map(p=>{const t=rows.filter(r=>r.person===p&&r.protein).reduce((s,r)=>s+(+r.protein||0),0);return t?`${pname(p)} ${n(t,0)}${L('ج بروتين','g protein')}`:''}).filter(Boolean).join(' · ');
+    const pr=PIDS().map(p=>{const rr=rows.filter(r=>r.person===p);const k=rr.reduce((s,r)=>s+(+r.kcal||0),0),t=rr.reduce((s,r)=>s+(+r.protein||0),0);if(!k&&!t)return '';return `${pname(p)} ${[k&&n(k,0)+' '+L('كالوري','kcal'),t&&n(t,0)+L('ج بروتين','g protein')].filter(Boolean).join(' / ')}`}).filter(Boolean).join(' · ');
     return `<div class="dayhead"><span>${fmtDate(d)}</span><span class="num">${pr}</span></div>`+rows.map(m=>`<div class="item">${tag(m.person)}
-      <div class="main"><div class="t">${esc(tr(TYPES,m.type))}</div><div class="d">${esc(m.text)}${m.protein?` · <span class="num">${n(+m.protein,0)}${L('ج بروتين','g protein')}</span>`:''}</div></div>
+      <div class="main"><div class="t">${esc(tr(TYPES,m.type))}</div><div class="d">${esc(m.text)}${m.kcal?` · <span class="num">${n(+m.kcal,0)} ${L('كالوري','kcal')}</span>`:''}${m.protein?` · <span class="num">${n(+m.protein,0)}${L('ج بروتين','g protein')}</span>`:''}</div></div>
       ${acts('meals',m.id)}</div>`).join('');
   }).join('');
   return addBtn+`<div class="card"><h2>${L('الأكل','Meals')}</h2><div class="list">${html}</div></div>`;
@@ -441,12 +447,16 @@ function personDash(p){
   const f=s[0],c=s[s.length-1],lost=+f.kg-+c.kg,days=daysBetween(f.date,c.date),wk=days>0?lost/(days/7):null,pct=lost/(+f.kg)*100;
   const comps=s.filter(w=>M.some(m=>w[m[0]]!=null));const cc=comps[comps.length-1],cp=comps.length>1?comps[comps.length-2]:null;
   const metric=([key,lbl,unit,gd])=>cc&&cc[key]!=null?`<div class="m"><span>${lbl}</span><b class="num">${n(+cc[key])}${unit}</b>${cp&&cp[key]!=null?delta(+cc[key],+cp[key],unit,gd):''}</div>`:'';
-  const wkProt=S.meals.filter(m=>m.person===p&&m.protein&&daysBetween(m.date,today())<7&&daysBetween(m.date,today())>=0);
+  const wk7=S.meals.filter(m=>m.person===p&&daysBetween(m.date,today())<7&&daysBetween(m.date,today())>=0);
+  const wkProt=wk7.filter(m=>m.protein),wkK=wk7.filter(m=>m.kcal);
   const protDays=new Set(wkProt.map(m=>m.date)).size;const protAvg=protDays?wkProt.reduce((a,m)=>a+(+m.protein||0),0)/protDays:null;
+  const kDays=new Set(wkK.map(m=>m.date)).size;const kAvg=kDays?wkK.reduce((a,m)=>a+(+m.kcal||0),0)/kDays:null;
+  const todayK=S.meals.filter(m=>m.person===p&&m.date===today()).reduce((a,m)=>a+(+m.kcal||0),0);
   return `<div class="card dcard" style="--pc:${col(p)}">${head}
     <div class="hero"><div><span class="lbl">${lost>=0?L('نزل','Lost'):L('زاد','Gained')}</span><b class="num">${n(Math.abs(lost))}<small>${KG()}</small></b></div>
       <div class="side num"><span>${L('من','from')} ${n(+f.kg)} ${L('إلى','to')} ${n(+c.kg)}</span><span>${n(Math.abs(pct))}% ${L('من الوزن','of body weight')}</span>${wk!=null?`<span>${n(Math.abs(wk))} ${KG()} ${L('في الأسبوع','per week')}</span>`:''}</div></div>
     ${cc?`<div class="metrics">${M.map(metric).join('')}</div><span class="muted">${L('آخر قراءة ميزان ذكي','Last smart-scale reading')} ${fmtShort(cc.date)}</span>`:''}
+    ${todayK||kAvg!=null?`<span class="muted num">${todayK?`${L('النهارده:','Today:')} ${n(todayK,0)} ${L('كالوري','kcal')}`:''}${todayK&&kAvg!=null?' · ':''}${kAvg!=null?`${L('متوسط آخر ٧ أيام:','7-day average:')} ${n(kAvg,0)} ${L('كالوري في اليوم','kcal/day')}`:''}</span>`:''}
     ${protAvg!=null?`<span class="muted num">${L('متوسط البروتين آخر ٧ أيام:','Average protein, last 7 days:')} ${n(protAvg,0)} ${L('جرام في اليوم','g per day')}</span>`:''}
   </div>`;
 }
@@ -500,7 +510,7 @@ function vSim(){
   const cur=currentDoses();
   PIDS().forEach(p=>{if(sim.d[p]==null)sim.d[p]=cur[p]!=null?cur[p]:0});
   const row=p=>`<div class="simrow"><span class="nm">${dot(p)}${pname(p)}</span>
-    <div class="stepper"><button type="button" data-step="${p}:-1.25" aria-label="${L('قلّل','Decrease')}">−</button><input id="s_${p}" data-sim="${p}" type="number" inputmode="decimal" step="0.25" min="0" value="${sim.d[p]}" aria-label="${pname(p)}"><button type="button" data-step="${p}:1.25" aria-label="${L('زوّد','Increase')}">+</button></div><span class="muted">${MG()}</span></div>`;
+    <div class="stepper"><button type="button" data-step="${p}:-1.25" aria-label="${L('قلّل','Decrease')}">−</button><input id="s_${p}" data-sim="${p}" type="number" inputmode="decimal" step="0.25" min="0" value="${sim.d[p]}" aria-label="${pname(p)}"><button type="button" data-step="${p}:1.25" aria-label="${L('زوّد','Increase')}">+</button></div><span class="muted"><span>${MG()}</span><br><span class="num" id="sc_${p}">${clkTxt(clk(+sim.d[p],S.pens.find(x=>x.id===sim.pen)))}</span></span></div>`;
   return `<div class="card"><h2>${L('جرّب جرعات مختلفة','Try different doses')}</h2>
     <div class="field"><label for="sPen">${L('القلم','Pen')}</label><select id="sPen">${pens.map(p=>`<option value="${p.id}" ${p.id===sim.pen?'selected':''}>${penTitle(p)} · ${L('فاضل','left')} ${n(penUsage(p).remaining)} ${MG()}</option>`).join('')}</select></div>
     ${PIDS().map(row).join('')}
@@ -510,6 +520,7 @@ function vSim(){
 }
 function updateSim(){
   const out=$('#simOut');if(!out)return;
+  PIDS().forEach(p=>{const el=$('#sc_'+p);if(el)el.textContent=clkTxt(clk(+sim.d[p],S.pens.find(x=>x.id===sim.pen)))});
   const pen=S.pens.find(p=>p.id===sim.pen);if(!pen){out.innerHTML='';return}
   const rem=penUsage(pen).remaining;
   const r=simulate(rem,planFrom(sim.d,sim.every),sim.every);
@@ -538,6 +549,10 @@ function vSettings(){
   return `<h2 style="font-size:20px">${L('الإعدادات','Settings')}</h2>
   <div class="card"><h2>${L('اللغة','Language')}</h2><div class="langseg"><button type="button" data-lang="ar" aria-pressed="${lang==='ar'}">العربية</button><button type="button" data-lang="en" aria-pressed="${lang==='en'}">English</button></div>
   <p class="hint">${L('كل واحد بيختار لغته على جهازه، والبيانات واحدة.','Each person picks their own language; the data stays the same.')}</p></div>
+  <div class="card"><h2>${L('التكات','Pen clicks')}</h2>
+  <div class="field"><label for="appClicks">${L('عدد التكات للجرعة الكاملة','Clicks per full dose')}</label><div class="actions"><input id="appClicks" type="number" inputmode="numeric" min="1" step="1" value="${n(APP.clicks,0)}" style="flex:1;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;min-width:0"><button class="btn" type="button" id="saveClicks" style="flex:0 0 auto">${L('حفظ','Save')}</button></div></div>
+  <div class="tips">${[2.5,5,7.5,10,12.5,15].map(st=>`<div class="tip"><b>${L('قلم','Pen')} ${st}</b><span class="num">${[2.5,5,7.5].filter(m=>m<=st).map(m=>`${m} ${MG()} = ${n(m/st*APP.clicks,0)} ${L('تكة','clicks')}`).join('<br>')}</span></div>`).join('')}</div>
+  <p class="hint">${L('٦٠ رقم متداول بين المستخدمين ومش رقم رسمي من الشركة، ودقة التكات مش مضمونة. اتأكد من الرقم مع الصيدلي وعدّله هنا، وكل الحسابات هتتغير معاه.','60 is a number commonly shared by users, not an official one, and click accuracy isn’t guaranteed. Confirm it with your pharmacist and change it here; every calculation updates.')}</p></div>
   <div class="card"><div class="row"><h2>${L('الأشخاص','People')}</h2><button class="btn" style="padding:8px 14px;font-size:14px" data-open="person" type="button">${L('+ إضافة','+ Add')}</button></div><div class="list">${rows}</div>
   <p class="hint">${L('كل شخص ليه لون بيظهر في الجرعات والأكل والوزن وقلم شير والمحاكي.','Each person has a color used across doses, meals, weight, pen share and the simulator.')}</p></div>
   <div class="card"><h2>${L('النسخ الاحتياطي والبيانات','Backup & data')}</h2>
@@ -553,7 +568,7 @@ async function saveFile(name,data,type){
     if(dl){await dl.save({filename:name,data:new Blob([data],{type})});toast(L('اتحفظ الملف','File saved'));return}}catch(e){if(e&&e.code==='cancelled')return}
   try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;document.body.appendChild(a);a.click();a.remove()}catch{toast(L('مقدرتش أحفظ الملف','Couldn’t save the file'))}
 }
-function exportJson(){saveFile('monguhelper-'+today()+'.json',JSON.stringify({app:'MonguHelper',v:1,exported:today(),data:{people:S.people,pens:S.pens,doses:S.doses,meals:S.meals,weights:S.weights}},null,1),'application/json')}
+function exportJson(){saveFile('monguhelper-'+today()+'.json',JSON.stringify({app:'MonguHelper',v:1,exported:today(),data:{app:APP,people:S.people,pens:S.pens,doses:S.doses,meals:S.meals,weights:S.weights}},null,1),'application/json')}
 function exportCsv(){
   const q=x=>{x=x==null?'':String(x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x};
   const nm=p=>S.people[p]?.name||p;const pen=id=>{const p=S.pens.find(x=>x.id===id);return p?(p.label||('Pen '+(p.strength||p.total))):''};
@@ -595,6 +610,7 @@ function openSheet(kind,rec){
     <div class="field"><label>${L('مين أخد الجرعة','Who took it')}</label>${personChips(defP)}</div>
     <div class="grid2"><div class="field"><label for="fMg">${L('الجرعة (مجم)','Dose (mg)')}</label><input id="fMg" type="number" inputmode="decimal" step="0.25" min="0" value="${ed?val(rec.mg):(last?+last.mg:'')}" placeholder="2.5"></div>
     <div class="field"><label for="fDate">${L('التاريخ','Date')}</label><input id="fDate" type="date" value="${ed?val(rec.date):today()}"></div></div>
+    <div class="field" id="clkBox"><label for="fClk">${L('أو بالتكات على القلم','Or in pen clicks')}</label><input id="fClk" type="number" inputmode="numeric" min="0" step="1"><span class="hint" id="clkHint"></span></div>
     <div class="field"><label for="fPen">${L('من أنهي قلم','From which pen')}</label><select id="fPen">${pens.map(p=>{const u=penUsage(p);return `<option value="${p.id}" ${selPen===p.id?'selected':''}>${penTitle(p)} · ${L('فاضل','left')} ${n(u.remaining)} ${MG()}</option>`}).join('')}</select></div>
     <div class="field"><label>${L('مكان الحقنة','Injection site')}</label>${chipRow('site',Object.keys(SITES).map(k=>[k,tr(SITES,k)]),sheetState.site)}</div>
     <div class="field"><label for="fNote">${L('ملاحظة (اختياري)','Note (optional)')}</label><input id="fNote" type="text" value="${ed?val(rec.note):''}" placeholder="${L('مثلاً: غثيان خفيف','e.g. mild nausea')}"></div>`;
@@ -606,7 +622,9 @@ function openSheet(kind,rec){
     <div class="grid2"><div class="field"><label for="fTotal">${L('إجمالي القلم (مجم)','Pen total (mg)')}</label><input id="fTotal" type="number" inputmode="decimal" step="0.25" min="0" value="${ed?val(rec.total):60}"></div>
     <div class="field"><label for="fPrice">${L('سعر القلم (اختياري)','Pen price (optional)')}</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="1" value="${ed?val(rec.price):''}" placeholder="${L('بالجنيه','EGP')}"></div></div>
     <div class="grid2"><div class="field"><label for="fOpened">${L('اتفتح يوم','Opened on')}</label><input id="fOpened" type="date" value="${ed?val(rec.opened):today()}"></div>
-    <div class="field"><label for="fLabel">${L('اسم مميز (اختياري)','Label (optional)')}</label><input id="fLabel" type="text" value="${ed?val(rec.label):''}" placeholder="${L('قلم نوفمبر','November pen')}"></div></div>`;
+    <div class="field"><label for="fLabel">${L('اسم مميز (اختياري)','Label (optional)')}</label><input id="fLabel" type="text" value="${ed?val(rec.label):''}" placeholder="${L('قلم نوفمبر','November pen')}"></div></div>
+    <div class="field"><label for="fClicks">${L('عدد التكات للجرعة الكاملة لو مختلف عن الإعدادات','Clicks per full dose, if different from Settings')}</label><input id="fClicks" type="number" inputmode="numeric" min="1" step="1" value="${ed?val(rec.clicks):''}" placeholder="${n(APP.clicks,0)}"></div>
+    <p class="hint">${L('سيبها فاضية عشان القلم ياخد الرقم العام من الإعدادات.','Leave empty to use the general number from Settings.')}</p>`;
   }else if(kind==='meal'){
     const h=new Date().getHours();const t=rec?.type||(h<11?'فطار':h<17?'غدا':h<22?'عشا':'سناك');
     sheetState={person:defP,type:t,editId:rec?.id};
@@ -614,8 +632,10 @@ function openSheet(kind,rec){
     <div class="field"><label>${L('مين','Who')}</label>${personChips(defP)}</div>
     <div class="field"><label>${L('الوجبة','Meal')}</label>${chipRow('type',Object.keys(TYPES).map(k=>[k,tr(TYPES,k)]),t)}</div>
     <div class="field"><label for="fText">${L('أكلت إيه','What did you eat')}</label><textarea id="fText" placeholder="${L('مثلاً: 2 بيض + عيش بلدي + خيار','e.g. 2 eggs, bread, cucumber')}">${ed?val(rec.text):''}</textarea></div>
-    <div class="grid2"><div class="field"><label for="fProt">${L('بروتين تقريبي (جرام)','Approx. protein (g)')}</label><input id="fProt" type="number" inputmode="numeric" min="0" step="1" value="${ed?val(rec.protein):''}" placeholder="${L('اختياري','optional')}"></div>
-    <div class="field"><label for="fDate">${L('التاريخ','Date')}</label><input id="fDate" type="date" value="${ed?val(rec.date):today()}"></div></div>`;
+    ${sampleFn?`<div class="scan"><button class="btn" type="button" id="calcBtn">${L('احسب السعرات والبروتين','Estimate calories & protein')}</button><span id="calcMsg">${L('Claude هيقدّر من الوصف، وانت تعدّل لو حابب.','Claude estimates from your description; adjust if you like.')}</span></div>`:''}
+    <div class="grid2"><div class="field"><label for="fKcal">${L('السعرات (كالوري)','Calories (kcal)')}</label><input id="fKcal" type="number" inputmode="numeric" min="0" step="1" value="${ed?val(rec.kcal):''}" placeholder="${L('اختياري','optional')}"></div>
+    <div class="field"><label for="fProt">${L('بروتين تقريبي (جرام)','Approx. protein (g)')}</label><input id="fProt" type="number" inputmode="numeric" min="0" step="1" value="${ed?val(rec.protein):''}" placeholder="${L('اختياري','optional')}"></div></div>
+    <div class="field"><label for="fDate">${L('التاريخ','Date')}</label><input id="fDate" type="date" value="${ed?val(rec.date):today()}"></div>`;
   }else if(kind==='weight'){
     sheetState={person:defP,editId:rec?.id};
     const l=wSeries(defP).slice(-1)[0];const WF=WFIELDS();
@@ -636,6 +656,7 @@ function openSheet(kind,rec){
     <div class="field"><label>${L('اللون','Color')}</label><div class="colors" data-chips="c">${[0,1,2,3,4,5].map(c=>`<button type="button" data-v="${c}" aria-pressed="${String(c)===sheetState.c}" style="background:var(--p${c})" aria-label="${c+1}"></button>`).join('')}</div></div>`;
   }
   $('#sheetHost').innerHTML=`<div class="scrim" data-close="1"><form class="sheet" id="sheetForm" data-kind="${kind}" novalidate>${body}<div class="actions"><button class="btn" type="submit">${ed?L('حفظ التعديل','Save changes'):L('حفظ','Save')}</button><button class="btn ghost" type="button" data-close="1">${L('إلغاء','Cancel')}</button></div><p class="hint" id="formErr" hidden></p></form></div>`;
+  if(kind==='dose')syncClk('mg');
 }
 function closeSheet(){$('#sheetHost').innerHTML=''}
 function err(m){const e=$('#formErr');e.textContent=m;e.hidden=false;e.style.color='var(--bad)'}
@@ -651,10 +672,10 @@ async function submitSheet(kind){
     data={person:sheetState.person,mg,date:v('fDate')||today(),pen,site:sheetState.site,note:v('fNote')};msg=eid?L('اتعدلت الجرعة','Dose updated'):L('اتسجلت الجرعة واتخصمت من القلم','Dose logged and subtracted from the pen');
   }else if(kind==='pen'){
     const total=num('fTotal');if(!total)return err(L('اكتب إجمالي القلم','Enter the pen total'));
-    data={strength:parseFloat(sheetState.strength)||null,total,price:num('fPrice'),opened:v('fOpened')||today(),label:v('fLabel')};msg=eid?L('اتعدل القلم','Pen updated'):L('اتضاف القلم','Pen added');
+    data={strength:parseFloat(sheetState.strength)||null,total,price:num('fPrice'),opened:v('fOpened')||today(),label:v('fLabel'),clicks:num('fClicks')};msg=eid?L('اتعدل القلم','Pen updated'):L('اتضاف القلم','Pen added');
   }else if(kind==='meal'){
     const text=v('fText');if(!text)return err(L('اكتب أكلت إيه','Write what you ate'));
-    data={person:sheetState.person,type:sheetState.type,text,protein:num('fProt'),date:v('fDate')||today()};msg=eid?L('اتعدلت الأكلة','Meal updated'):L('اتسجلت الأكلة','Meal logged');
+    data={person:sheetState.person,type:sheetState.type,text,protein:num('fProt'),kcal:num('fKcal'),date:v('fDate')||today()};msg=eid?L('اتعدلت الأكلة','Meal updated'):L('اتسجلت الأكلة','Meal logged');
   }else if(kind==='weight'){
     const kg=num('fKg');if(!(kg>20&&kg<400))return err(L('اكتب الوزن بالكيلو','Enter weight in kg'));
     data={person:sheetState.person,kg,date:v('fDate')||today()};WFIELDS().forEach(([id,k])=>data[k]=num(id));msg=eid?L('اتعدل الوزن','Weight updated'):L('اتسجل الوزن','Weight logged');
@@ -667,6 +688,21 @@ async function submitSheet(kind){
   closeSheet();
   if(eid)await updRow(COLL_OF[kind],eid,data);else await addRow(COLL_OF[kind],data);
   toast(msg);
+}
+async function estimateMeal(){
+  const msg=$('#calcMsg'),btn=$('#calcBtn'),text=($('#fText')?.value||'').trim();
+  if(!text){msg.textContent=L('اكتب الأول أكلت إيه وكمياته.','First write what you ate and how much.');return}
+  if(!sampleFn)return;btn.disabled=true;msg.textContent=L('بيحسب…','Estimating…');
+  try{
+    const r=await sampleFn.json(`Estimate the total calories and protein for this meal. It may be written in Egyptian Arabic and include Egyptian dishes (e.g. foul, ta'meya, koshari, baladi bread, molokhia). Assume typical Egyptian home portions when amounts are missing. Reply with only JSON: {"kcal": number, "protein": number (grams), "note": short note in ${lang==='en'?'English':'Egyptian Arabic'} listing the main items and assumed portions (max 120 chars)}.\n\nMeal: ${text.slice(0,1500)}`,{modelTier:'quick'});
+    if(!r||typeof r!=='object')throw {code:'invalid_json'};
+    if(typeof r.kcal==='number')$('#fKcal').value=Math.round(r.kcal);
+    if(typeof r.protein==='number')$('#fProt').value=Math.round(r.protein);
+    msg.textContent=(typeof r.note==='string'?r.note.slice(0,200)+' — ':'')+L('تقدير تقريبي، عدّل لو محتاج.','A rough estimate; adjust if needed.');
+  }catch(e){const c=e&&e.code;
+    if(c==='not_granted'||c==='sampling_disabled'){$('#calcBtn')?.closest('.scan')?.remove();toast(L('الحساب التلقائي مش متاح هنا، اكتب الأرقام بإيدك','Auto-estimate isn’t available here; type the numbers.'));return}
+    msg.textContent=c==='rate_limited'?L('طلبات كتير، استنى شوية.','Too many requests, wait a bit.'):L('مقدرتش أحسب، جرّب تاني أو اكتبها بإيدك.','Couldn’t estimate. Try again or type them.');
+  }finally{if(btn)btn.disabled=false}
 }
 async function scanImage(file){
   const msg=$('#scanMsg'),btn=$('#scanBtn');if(!file||!sampleFn)return;
@@ -713,9 +749,11 @@ document.addEventListener('click',e=>{
   if(t.dataset.open){openSheet(t.dataset.open);return}
   if(t.id==='btnSettings'){view='settings';render();window.scrollTo({top:0});return}
   if(t.dataset.lang){lang=t.dataset.lang;try{localStorage.setItem('mongu-lang',lang)}catch{}closeSheet();render();return}
+  if(t.id==='saveClicks'){const v=parseFloat($('#appClicks').value);if(!(v>0))return toast(L('اكتب رقم صحيح','Enter a valid number'));APP.clicks=Math.round(v);saveApp();toast(L('اتحفظ','Saved'));return}
   if(t.id==='btnExport'){exportJson();return}
   if(t.id==='btnCsv'){exportCsv();return}
   if(t.id==='btnImport'){$('#importFile').click();return}
+  if(t.id==='calcBtn'){estimateMeal();return}
   if(t.id==='scanBtn'){$('#scanFile').click();return}
   if(t.dataset.person){openSheet('person',t.dataset.person);return}
   if(t.dataset.close&&(e.target===t||t.tagName==='BUTTON')){closeSheet();return}
@@ -735,8 +773,16 @@ document.addEventListener('click',e=>{
     if(k==='person'&&$('#fMg')&&!sheetState.editId){const l=lastDose(t.dataset.v);if(l)$('#fMg').value=+l.mg}
   }
 });
-document.addEventListener('input',e=>{const p=e.target.dataset&&e.target.dataset.sim;if(p){sim.d[p]=parseFloat(e.target.value)||0;updateSim()}});
-document.addEventListener('change',e=>{if(e.target.id==='sPen'){sim.pen=e.target.value;render()}if(e.target.id==='importFile'){const f=e.target.files&&e.target.files[0];if(f)importJson(f);e.target.value=''}
+function syncClk(from){
+  const pen=S.pens.find(p=>p.id===($('#fPen')||{}).value);const box=$('#clkBox');if(!box)return;
+  const mgI=$('#fMg'),cI=$('#fClk'),h=$('#clkHint');
+  if(!(pen&&+pen.strength>0&&perDose(pen)>0)){cI.disabled=true;cI.value='';h.textContent=L('القلم ده مكتوبش عليه التركيز، عدّل بياناته.','This pen has no strength set; edit it.');return}
+  cI.disabled=false;h.textContent=L(`قلم ${n(+pen.strength)}: كل ${n(perDose(pen),0)} تكة = ${n(+pen.strength)} مجم، يعني التكة ≈ ${n(+pen.strength/perDose(pen),3)} مجم`,`${n(+pen.strength)} mg pen: ${n(perDose(pen),0)} clicks = ${n(+pen.strength)} mg, so 1 click ≈ ${n(+pen.strength/perDose(pen),3)} mg`);
+  if(from==='clk'){const c=parseFloat(cI.value);if(c>0)mgI.value=n(c/perDose(pen)*+pen.strength,2)}
+  else{const c=clk(parseFloat(mgI.value),pen);cI.value=c==null?'':n(c,0)}
+}
+document.addEventListener('input',e=>{if(e.target.id==='fMg')syncClk('mg');if(e.target.id==='fClk')syncClk('clk');const p=e.target.dataset&&e.target.dataset.sim;if(p){sim.d[p]=parseFloat(e.target.value)||0;updateSim()}});
+document.addEventListener('change',e=>{if(e.target.id==='sPen'){sim.pen=e.target.value;render()}if(e.target.id==='fPen')syncClk('mg');if(e.target.id==='importFile'){const f=e.target.files&&e.target.files[0];if(f)importJson(f);e.target.value=''}
   if(e.target.id==='scanFile'){scanImage(e.target.files&&e.target.files[0]);e.target.value=''}});
 document.addEventListener('submit',e=>{e.preventDefault();const f=e.target;if(f.id==='sheetForm')submitSheet(f.dataset.kind)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
