@@ -81,6 +81,7 @@ header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background
 .pen{display:flex;flex-direction:column;gap:10px}
 .pen .head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .pen .remain{font-family:var(--display);font-size:34px;font-weight:700;line-height:1}
+.clkline{display:block;font-size:13px;font-weight:600;color:var(--accent);margin-top:6px;text-align:end}
 .pen .remain small{font-size:15px;font-weight:500;color:var(--muted);margin-inline-start:4px}
 .barrel{position:relative;height:30px;border-radius:15px;background:var(--sunk);overflow:hidden;display:flex;border:1px solid var(--line)}
 .barrel span{height:100%}
@@ -317,6 +318,7 @@ function forecast(pen){
 function barrel(u){return `<div class="barrel" role="img" aria-label="${n(u.remaining)} / ${n(u.total)} ${MG()}">${PIDS().filter(p=>u.by[p]).map(p=>`<span style="width:${u.total?Math.min(100,u.by[p]/u.total*100):0}%;background:${col(p)}"></span>`).join('')}<span class="left" style="flex:1"></span></div>`}
 const perDose=p=>+(p&&p.clicks)>0?+p.clicks:+APP.clicks;
 const clk=(mg,p)=>p&&+p.strength>0&&perDose(p)>0&&mg>0?mg/+p.strength*perDose(p):null;
+const penClk=(p,mg)=>{const c=clk(mg,p);return c==null?'':` ≈ ${n(c,0)} ${L('تكة','clicks')}`};
 const clkTxt=x=>x==null?'':`≈ ${n(x,0)} ${L('تكة','clicks')}`;
 const acts=(c,id)=>`<span class="acts"><button class="del" type="button" data-edit="${c}:${id}">${L('تعديل','Edit')}</button><button class="del" type="button" data-del="${c}:${id}">${L('حذف','Delete')}</button></span>`;
 
@@ -351,6 +353,7 @@ function vDoses(){
   }else{
     const f=forecast(pen),u=f.u;const fc=[];
     fc.push(`<div class="fc"><b class="num">${u.count}</b><span>${L('جرعة اتاخدت منه','doses taken from it')}</span></div>`);
+    PIDS().filter(p=>u.by[p]).forEach(p=>{const c=clk(u.by[p],pen);if(c!=null)fc.push(`<div class="fc"><b class="num">${dot(p)}${n(c,0)} ${L('تكة','clicks')}</b><span>${L(`استخدام ${pname(p)}`,`used by ${pname(p)}`)} (${n(u.by[p])} ${MG()})</span></div>`)});
     if(f.plan.length){
       fc.push(`<div class="fc"><b class="num">${n(f.weekly)} ${MG()}</b><span>${L('الاستهلاك في الأسبوع','used per week')}</span></div>`);
       f.plan.sort((x,y)=>cidx(x.p)-cidx(y.p)).forEach(x=>fc.push(`<div class="fc"><b class="num">${x.covered} ${L('جرعة','doses')}</b><span>${L(`تكفي ${pname(x.p)}`,`left for ${pname(x.p)}`)} (${n(x.mg)} ${MG()})</span></div>`));
@@ -358,7 +361,7 @@ function vDoses(){
     }else fc.push(`<div class="fc"><b>—</b><span>${L('سجّل أول جرعة عشان نحسب التوقع','Log a first dose to get a forecast')}</span></div>`);
     penHtml=`<div class="card pen">
       <div class="head"><div><h2>${penTitle(pen)}</h2><span class="muted num">${L('اتفتح','Opened')} ${fmtShort(pen.opened)}</span></div>
-      <div class="remain num">${n(u.remaining)}<small>${L('من','of')} ${n(u.total)} ${MG()}</small></div></div>
+      <div class="remain num">${n(u.remaining)}<small>${L('من','of')} ${n(u.total)} ${MG()}</small>${clk(u.remaining,pen)!=null?`<span class="clkline">${L('فاضل','left')} ≈ ${n(clk(u.remaining,pen),0)} ${L('تكة','clicks')} ${L('من','of')} ${n(clk(u.total,pen),0)}</span>`:''}</div></div>
       ${barrel(u)}
       <div class="ticks num">${PIDS().filter(p=>u.by[p]).map(p=>`<span>${dot(p)}${pname(p)} ${n(u.by[p])} ${MG()}</span>`).join('')}</div>
       <div class="forecast">${fc.join('')}</div></div>`;
@@ -385,11 +388,11 @@ function vShare(){
     const u=penUsage(p),pc=x=>u.total?x/u.total*100:0;
     const st=u.remaining<=0.01?`<span class="pill warn">${L('خلص','Empty')}</span>`:(act&&act.id===p.id?`<span class="pill">${L('الحالي','Current')}</span>`:'');
     const rows=shown().map(k=>{const mg=u.by[k]||0;if(!mg&&who==='all')return '';const cnt=S.doses.filter(d=>d.pen===p.id&&d.person===k).length;
-      return `<div class="srow"><span>${dot(k)}${pname(k)}</span><span class="num muted">${n(mg)} ${MG()} · ${cnt} ${L('جرعة','doses')}${+p.price>0?` · ${money(p.price*mg/u.total)}`:''}</span><b class="num">${n(pc(mg),0)}%</b></div>`}).join('');
+      return `<div class="srow"><span>${dot(k)}${pname(k)}</span><span class="num muted">${n(mg)} ${MG()}${penClk(p,mg)} · ${cnt} ${L('جرعة','doses')}${+p.price>0?` · ${money(p.price*mg/u.total)}`:''}</span><b class="num">${n(pc(mg),0)}%</b></div>`}).join('');
     return `<div class="card"><div class="row"><h2>${penTitle(p)} ${st}</h2>${acts('pens',p.id)}</div>
-      <span class="muted num">${L('اتفتح','Opened')} ${fmtShort(p.opened)} · ${L('فاضل','left')} ${n(u.remaining)} ${L('من','of')} ${n(u.total)} ${MG()}${+p.price>0?` · ${L('السعر','price')} ${money(+p.price)}`:''}</span>
+      <span class="muted num">${L('اتفتح','Opened')} ${fmtShort(p.opened)} · ${L('فاضل','left')} ${n(u.remaining)} ${L('من','of')} ${n(u.total)} ${MG()}${penClk(p,u.remaining)}${+p.price>0?` · ${L('السعر','price')} ${money(+p.price)}`:''}</span>
       ${barrel(u)}
-      <div class="srows">${rows}<div class="srow"><span>${L('لسه في القلم','Still in the pen')}</span><span></span><b class="num">${n(pc(u.remaining),0)}%</b></div></div></div>`;
+      <div class="srows">${rows}<div class="srow"><span>${L('لسه في القلم','Still in the pen')}</span><span class="num muted">${n(u.remaining)} ${MG()}${penClk(p,u.remaining)}</span><b class="num">${n(pc(u.remaining),0)}%</b></div></div></div>`;
   }).join('');
   return addBtn+summary+cards;
 }
@@ -492,7 +495,7 @@ const MOVES=()=>lang==='en'?[
 ];
 function vDash(){
   const pen=activePen();let penLine='';
-  if(pen){const f=forecast(pen);penLine=`<div class="card"><div class="row"><h2>${L('القلم الحالي','Current pen')}</h2><span class="num muted">${L('فاضل','left')} ${n(f.u.remaining)} ${L('من','of')} ${n(f.u.total)} ${MG()}</span></div>${barrel(f.u)}
+  if(pen){const f=forecast(pen);penLine=`<div class="card"><div class="row"><h2>${L('القلم الحالي','Current pen')}</h2><span class="num muted">${L('فاضل','left')} ${n(f.u.remaining)} ${L('من','of')} ${n(f.u.total)} ${MG()}${penClk(pen,f.u.remaining)}</span></div>${barrel(f.u)}
     ${f.emptyOn?`<span class="muted">${L('محتاجين قلم جديد قبل','New pen needed by')} ${fmtDate(f.emptyOn)}</span>`:''}</div>`}
   return shown().map(personDash).join('')+(S.weights.length>1?`<div class="card"><h2>${L('منحنى الوزن','Weight chart')}</h2>${chart()}</div>`:'')+penLine+
   `<div class="card"><h2>${L('نصايح مع الحقنة','Tips while on the shot')}</h2><div class="tips">${TIPS().map(([t,d])=>`<div class="tip"><b>${t}</b><span>${d}</span></div>`).join('')}</div></div>
@@ -510,7 +513,7 @@ function vSim(){
   const cur=currentDoses();
   PIDS().forEach(p=>{if(sim.d[p]==null)sim.d[p]=cur[p]!=null?cur[p]:0});
   const row=p=>`<div class="simrow"><span class="nm">${dot(p)}${pname(p)}</span>
-    <div class="stepper"><button type="button" data-step="${p}:-1.25" aria-label="${L('قلّل','Decrease')}">−</button><input id="s_${p}" data-sim="${p}" type="number" inputmode="decimal" step="0.25" min="0" value="${sim.d[p]}" aria-label="${pname(p)}"><button type="button" data-step="${p}:1.25" aria-label="${L('زوّد','Increase')}">+</button></div><span class="muted"><span>${MG()}</span><br><span class="num" id="sc_${p}">${clkTxt(clk(+sim.d[p],S.pens.find(x=>x.id===sim.pen)))}</span></span></div>`;
+    <div class="stepper"><button type="button" data-step="${p}:-1.25" aria-label="${L('قلّل','Decrease')}">−</button><input id="s_${p}" data-sim="${p}" type="text" inputmode="decimal" step="0.25" min="0" value="${sim.d[p]}" aria-label="${pname(p)}"><button type="button" data-step="${p}:1.25" aria-label="${L('زوّد','Increase')}">+</button></div><span class="muted"><span>${MG()}</span><br><span class="num" id="sc_${p}">${clkTxt(clk(+sim.d[p],S.pens.find(x=>x.id===sim.pen)))}</span></span></div>`;
   return `<div class="card"><h2>${L('جرّب جرعات مختلفة','Try different doses')}</h2>
     <div class="field"><label for="sPen">${L('القلم','Pen')}</label><select id="sPen">${pens.map(p=>`<option value="${p.id}" ${p.id===sim.pen?'selected':''}>${penTitle(p)} · ${L('فاضل','left')} ${n(penUsage(p).remaining)} ${MG()}</option>`).join('')}</select></div>
     ${PIDS().map(row).join('')}
@@ -550,7 +553,7 @@ function vSettings(){
   <div class="card"><h2>${L('اللغة','Language')}</h2><div class="langseg"><button type="button" data-lang="ar" aria-pressed="${lang==='ar'}">العربية</button><button type="button" data-lang="en" aria-pressed="${lang==='en'}">English</button></div>
   <p class="hint">${L('كل واحد بيختار لغته على جهازه، والبيانات واحدة.','Each person picks their own language; the data stays the same.')}</p></div>
   <div class="card"><h2>${L('التكات','Pen clicks')}</h2>
-  <div class="field"><label for="appClicks">${L('عدد التكات للجرعة الكاملة','Clicks per full dose')}</label><div class="actions"><input id="appClicks" type="number" inputmode="numeric" min="1" step="1" value="${n(APP.clicks,0)}" style="flex:1;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;min-width:0"><button class="btn" type="button" id="saveClicks" style="flex:0 0 auto">${L('حفظ','Save')}</button></div></div>
+  <div class="field"><label for="appClicks">${L('عدد التكات للجرعة الكاملة','Clicks per full dose')}</label><div class="actions"><input id="appClicks" type="text" inputmode="numeric" min="1" step="1" value="${n(APP.clicks,0)}" style="flex:1;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;min-width:0"><button class="btn" type="button" id="saveClicks" style="flex:0 0 auto">${L('حفظ','Save')}</button></div></div>
   <div class="tips">${[2.5,5,7.5,10,12.5,15].map(st=>`<div class="tip"><b>${L('قلم','Pen')} ${st}</b><span class="num">${[2.5,5,7.5].filter(m=>m<=st).map(m=>`${m} ${MG()} = ${n(m/st*APP.clicks,0)} ${L('تكة','clicks')}`).join('<br>')}</span></div>`).join('')}</div>
   <p class="hint">${L('٦٠ رقم متداول بين المستخدمين ومش رقم رسمي من الشركة، ودقة التكات مش مضمونة. اتأكد من الرقم مع الصيدلي وعدّله هنا، وكل الحسابات هتتغير معاه.','60 is a number commonly shared by users, not an official one, and click accuracy isn’t guaranteed. Confirm it with your pharmacist and change it here; every calculation updates.')}</p></div>
   <div class="card"><div class="row"><h2>${L('الأشخاص','People')}</h2><button class="btn" style="padding:8px 14px;font-size:14px" data-open="person" type="button">${L('+ إضافة','+ Add')}</button></div><div class="list">${rows}</div>
@@ -608,22 +611,22 @@ function openSheet(kind,rec){
     const pens=[...S.pens].sort((x,y)=>(y.opened||'').localeCompare(x.opened||''));const selPen=rec?.pen||act?.id;
     body=`<h3>${ed?L('تعديل جرعة','Edit dose'):L('تسجيل جرعة','Log a dose')}</h3>
     <div class="field"><label>${L('مين أخد الجرعة','Who took it')}</label>${personChips(defP)}</div>
-    <div class="grid2"><div class="field"><label for="fMg">${L('الجرعة (مجم)','Dose (mg)')}</label><input id="fMg" type="number" inputmode="decimal" step="0.25" min="0" value="${ed?val(rec.mg):(last?+last.mg:'')}" placeholder="2.5"></div>
+    <div class="grid2"><div class="field"><label for="fMg">${L('الجرعة (مجم)','Dose (mg)')}</label><input id="fMg" type="text" inputmode="decimal" step="0.25" min="0" value="${ed?val(rec.mg):(last?+last.mg:'')}" placeholder="2.5"></div>
     <div class="field"><label for="fDate">${L('التاريخ','Date')}</label><input id="fDate" type="date" value="${ed?val(rec.date):today()}"></div></div>
-    <div class="field" id="clkBox"><label for="fClk">${L('أو بالتكات على القلم','Or in pen clicks')}</label><input id="fClk" type="number" inputmode="numeric" min="0" step="1"><span class="hint" id="clkHint"></span></div>
+    <div class="field" id="clkBox"><label for="fClk">${L('أو بالتكات على القلم','Or in pen clicks')}</label><input id="fClk" type="text" inputmode="numeric" min="0" step="1"><span class="hint" id="clkHint"></span></div>
     <div class="field"><label for="fPen">${L('من أنهي قلم','From which pen')}</label><select id="fPen">${pens.map(p=>{const u=penUsage(p);return `<option value="${p.id}" ${selPen===p.id?'selected':''}>${penTitle(p)} · ${L('فاضل','left')} ${n(u.remaining)} ${MG()}</option>`}).join('')}</select></div>
     <div class="field"><label>${L('مكان الحقنة','Injection site')}</label>${chipRow('site',Object.keys(SITES).map(k=>[k,tr(SITES,k)]),sheetState.site)}</div>
-    <div class="field"><label for="fNote">${L('ملاحظة (اختياري)','Note (optional)')}</label><input id="fNote" type="text" value="${ed?val(rec.note):''}" placeholder="${L('مثلاً: غثيان خفيف','e.g. mild nausea')}"></div>`;
+    <div class="field"><label for="fNote">${L('ملاحظة (اختياري)','Note (optional)')}</label><input id="fNote" type="text" dir="auto" value="${ed?val(rec.note):''}" placeholder="${L('مثلاً: غثيان خفيف','e.g. mild nausea')}"></div>`;
   }else if(kind==='pen'){
     sheetState={strength:String(rec?.strength||'15'),editId:rec?.id};
     body=`<h3>${ed?L('تعديل القلم','Edit pen'):L('إضافة قلم','Add pen')}</h3>
     <div class="field"><label>${L('المكتوب على القلم (مجم)','Strength on the pen (mg)')}</label>${chipRow('strength',[['2.5','2.5'],['5','5'],['7.5','7.5'],['10','10'],['12.5','12.5'],['15','15']],sheetState.strength)}</div>
     <p class="hint">${L('القلم فيه ٤ جرعات من الرقم المكتوب عليه، فالإجمالي = الرقم × ٤ (قلم ١٥ = ٦٠ مجم). لو قلمكم مختلف عدّل الإجمالي.','A pen holds 4 doses of its labeled strength, so total = strength × 4 (a 15 mg pen = 60 mg). Change the total if yours differs.')}</p>
-    <div class="grid2"><div class="field"><label for="fTotal">${L('إجمالي القلم (مجم)','Pen total (mg)')}</label><input id="fTotal" type="number" inputmode="decimal" step="0.25" min="0" value="${ed?val(rec.total):60}"></div>
-    <div class="field"><label for="fPrice">${L('سعر القلم (اختياري)','Pen price (optional)')}</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="1" value="${ed?val(rec.price):''}" placeholder="${L('بالجنيه','EGP')}"></div></div>
+    <div class="grid2"><div class="field"><label for="fTotal">${L('إجمالي القلم (مجم)','Pen total (mg)')}</label><input id="fTotal" type="text" inputmode="decimal" step="0.25" min="0" value="${ed?val(rec.total):60}"></div>
+    <div class="field"><label for="fPrice">${L('سعر القلم (اختياري)','Pen price (optional)')}</label><input id="fPrice" type="text" inputmode="decimal" min="0" step="1" value="${ed?val(rec.price):''}" placeholder="${L('بالجنيه','EGP')}"></div></div>
     <div class="grid2"><div class="field"><label for="fOpened">${L('اتفتح يوم','Opened on')}</label><input id="fOpened" type="date" value="${ed?val(rec.opened):today()}"></div>
-    <div class="field"><label for="fLabel">${L('اسم مميز (اختياري)','Label (optional)')}</label><input id="fLabel" type="text" value="${ed?val(rec.label):''}" placeholder="${L('قلم نوفمبر','November pen')}"></div></div>
-    <div class="field"><label for="fClicks">${L('عدد التكات للجرعة الكاملة لو مختلف عن الإعدادات','Clicks per full dose, if different from Settings')}</label><input id="fClicks" type="number" inputmode="numeric" min="1" step="1" value="${ed?val(rec.clicks):''}" placeholder="${n(APP.clicks,0)}"></div>
+    <div class="field"><label for="fLabel">${L('اسم مميز (اختياري)','Label (optional)')}</label><input id="fLabel" type="text" dir="auto" value="${ed?val(rec.label):''}" placeholder="${L('قلم نوفمبر','November pen')}"></div></div>
+    <div class="field"><label for="fClicks">${L('عدد التكات للجرعة الكاملة لو مختلف عن الإعدادات','Clicks per full dose, if different from Settings')}</label><input id="fClicks" type="text" inputmode="numeric" min="1" step="1" value="${ed?val(rec.clicks):''}" placeholder="${n(APP.clicks,0)}"></div>
     <p class="hint">${L('سيبها فاضية عشان القلم ياخد الرقم العام من الإعدادات.','Leave empty to use the general number from Settings.')}</p>`;
   }else if(kind==='meal'){
     const h=new Date().getHours();const t=rec?.type||(h<11?'فطار':h<17?'غدا':h<22?'عشا':'سناك');
@@ -631,10 +634,10 @@ function openSheet(kind,rec){
     body=`<h3>${ed?L('تعديل أكلة','Edit meal'):L('تسجيل أكلة','Log a meal')}</h3>
     <div class="field"><label>${L('مين','Who')}</label>${personChips(defP)}</div>
     <div class="field"><label>${L('الوجبة','Meal')}</label>${chipRow('type',Object.keys(TYPES).map(k=>[k,tr(TYPES,k)]),t)}</div>
-    <div class="field"><label for="fText">${L('أكلت إيه','What did you eat')}</label><textarea id="fText" placeholder="${L('مثلاً: 2 بيض + عيش بلدي + خيار','e.g. 2 eggs, bread, cucumber')}">${ed?val(rec.text):''}</textarea></div>
+    <div class="field"><label for="fText">${L('أكلت إيه','What did you eat')}</label><textarea id="fText" dir="auto" placeholder="${L('مثلاً: 2 بيض + عيش بلدي + خيار','e.g. 2 eggs, bread, cucumber')}">${ed?val(rec.text):''}</textarea></div>
     ${sampleFn?`<div class="scan"><button class="btn" type="button" id="calcBtn">${L('احسب السعرات والبروتين','Estimate calories & protein')}</button><span id="calcMsg">${L('Claude هيقدّر من الوصف، وانت تعدّل لو حابب.','Claude estimates from your description; adjust if you like.')}</span></div>`:''}
-    <div class="grid2"><div class="field"><label for="fKcal">${L('السعرات (كالوري)','Calories (kcal)')}</label><input id="fKcal" type="number" inputmode="numeric" min="0" step="1" value="${ed?val(rec.kcal):''}" placeholder="${L('اختياري','optional')}"></div>
-    <div class="field"><label for="fProt">${L('بروتين تقريبي (جرام)','Approx. protein (g)')}</label><input id="fProt" type="number" inputmode="numeric" min="0" step="1" value="${ed?val(rec.protein):''}" placeholder="${L('اختياري','optional')}"></div></div>
+    <div class="grid2"><div class="field"><label for="fKcal">${L('السعرات (كالوري)','Calories (kcal)')}</label><input id="fKcal" type="text" inputmode="numeric" min="0" step="1" value="${ed?val(rec.kcal):''}" placeholder="${L('اختياري','optional')}"></div>
+    <div class="field"><label for="fProt">${L('بروتين تقريبي (جرام)','Approx. protein (g)')}</label><input id="fProt" type="text" inputmode="numeric" min="0" step="1" value="${ed?val(rec.protein):''}" placeholder="${L('اختياري','optional')}"></div></div>
     <div class="field"><label for="fDate">${L('التاريخ','Date')}</label><input id="fDate" type="date" value="${ed?val(rec.date):today()}"></div>`;
   }else if(kind==='weight'){
     sheetState={person:defP,editId:rec?.id};
@@ -643,16 +646,16 @@ function openSheet(kind,rec){
     body=`<h3>${ed?L('تعديل الوزن','Edit weight'):L('تسجيل وزن','Log weight')}</h3>
     <div class="field"><label>${L('مين','Who')}</label>${personChips(defP)}</div>
     ${canImg?`<div class="scan"><button class="btn" type="button" id="scanBtn">${L('ارفع صورة الميزان','Upload scale screenshot')}</button><span id="scanMsg">${L('Claude هيقرا الأرقام من الصورة ويملا الخانات، وانت تراجع وتحفظ.','Claude reads the numbers and fills the fields; you review and save.')}</span><input id="scanFile" type="file" accept="image/*" hidden></div>`:''}
-    <div class="grid2"><div class="field"><label for="fKg">${L('الوزن (كجم)','Weight (kg)')}</label><input id="fKg" type="number" inputmode="decimal" step="0.1" min="20" value="${ed?val(rec.kg):(l?+l.kg:'')}"></div>
+    <div class="grid2"><div class="field"><label for="fKg">${L('الوزن (كجم)','Weight (kg)')}</label><input id="fKg" type="text" inputmode="decimal" step="0.1" min="20" value="${ed?val(rec.kg):(l?+l.kg:'')}"></div>
     <div class="field"><label for="fDate">${L('التاريخ','Date')}</label><input id="fDate" type="date" value="${ed?val(rec.date):today()}"></div></div>
     <details class="more" id="moreBox" ${hasComp?'open':''}><summary>${L('أرقام الميزان الذكي (اختياري)','Smart-scale numbers (optional)')}</summary>
-    <div class="grid2">${WF.map(([id,k,lbl,st])=>`<div class="field"><label for="${id}">${lbl}</label><input id="${id}" type="number" inputmode="decimal" step="${st}" value="${ed?val(rec[k]):''}"></div>`).join('')}</div></details>`;
+    <div class="grid2">${WF.map(([id,k,lbl,st])=>`<div class="field"><label for="${id}">${lbl}</label><input id="${id}" type="text" inputmode="decimal" step="${st}" value="${ed?val(rec[k]):''}"></div>`).join('')}</div></details>`;
   }else if(kind==='person'){
     const p=rec?S.people[rec]:null;const used=new Set(PIDS().map(cidx));
     const freeC=[0,1,2,3,4,5].find(c=>!used.has(c))??PIDS().length%6;
     sheetState={editId:rec||null,c:String(p?cidx(rec):freeC)};
     body=`<h3>${p?L('تعديل الشخص','Edit person'):L('إضافة شخص','Add person')}</h3>
-    <div class="field"><label for="fName">${L('الاسم','Name')}</label><input id="fName" type="text" value="${p?esc(p.name):''}"></div>
+    <div class="field"><label for="fName">${L('الاسم','Name')}</label><input id="fName" type="text" dir="auto" value="${p?esc(p.name):''}"></div>
     <div class="field"><label>${L('اللون','Color')}</label><div class="colors" data-chips="c">${[0,1,2,3,4,5].map(c=>`<button type="button" data-v="${c}" aria-pressed="${String(c)===sheetState.c}" style="background:var(--p${c})" aria-label="${c+1}"></button>`).join('')}</div></div>`;
   }
   $('#sheetHost').innerHTML=`<div class="scrim" data-close="1"><form class="sheet" id="sheetForm" data-kind="${kind}" novalidate>${body}<div class="actions"><button class="btn" type="submit">${ed?L('حفظ التعديل','Save changes'):L('حفظ','Save')}</button><button class="btn ghost" type="button" data-close="1">${L('إلغاء','Cancel')}</button></div><p class="hint" id="formErr" hidden></p></form></div>`;
@@ -781,6 +784,9 @@ function syncClk(from){
   if(from==='clk'){const c=parseFloat(cI.value);if(c>0)mgI.value=n(c/perDose(pen)*+pen.strength,2)}
   else{const c=clk(parseFloat(mgI.value),pen);cI.value=c==null?'':n(c,0)}
 }
+const AR_DIG=/[\u0660-\u0669\u06F0-\u06F9\u066B\u066C\u060C]/g;
+function normNum(str){return String(str).replace(AR_DIG,c=>{const k=c.charCodeAt(0);if(k>=0x660&&k<=0x669)return String(k-0x660);if(k>=0x6F0&&k<=0x6F9)return String(k-0x6F0);return c==='\u066C'?'':'.'}).replace(/,/g,'.').replace(/[^0-9.\-]/g,'').replace(/(\..*)\./g,'$1')}
+document.addEventListener('input',e=>{const el=e.target;if(el&&el.tagName==='INPUT'&&/^(decimal|numeric)$/.test(el.getAttribute('inputmode')||'')){const v=normNum(el.value);if(v!==el.value)el.value=v}},true);
 document.addEventListener('input',e=>{if(e.target.id==='fMg')syncClk('mg');if(e.target.id==='fClk')syncClk('clk');const p=e.target.dataset&&e.target.dataset.sim;if(p){sim.d[p]=parseFloat(e.target.value)||0;updateSim()}});
 document.addEventListener('change',e=>{if(e.target.id==='sPen'){sim.pen=e.target.value;render()}if(e.target.id==='fPen')syncClk('mg');if(e.target.id==='importFile'){const f=e.target.files&&e.target.files[0];if(f)importJson(f);e.target.value=''}
   if(e.target.id==='scanFile'){scanImage(e.target.files&&e.target.files[0]);e.target.value=''}});
